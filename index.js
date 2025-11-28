@@ -1,8 +1,9 @@
-const express = require('express')
-const cors = require('cors');
-require('dotenv').config();
-const app = express()
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const express = require("express");
+const cors = require("cors");
+require("dotenv").config();
+const app = express();
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
 const port = process.env.PORT || 3000;
 
 // Middleware
@@ -16,7 +17,7 @@ const client = new MongoClient(uri, {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  }
+  },
 });
 async function run() {
   try {
@@ -27,42 +28,91 @@ async function run() {
     const parcelCollection = zap_shift_db.collection("parcels");
 
     app.get("/parcels", async (req, res) => {
-        const query = {};
-        const {email} = req.query;
-        if(email){
-            query.senderEmail = email;
-        }
-        const options = {sort : {createdAt : -1}}
+      const query = {};
+      const { email } = req.query;
+      if (email) {
+        query.senderEmail = email;
+      }
+      const options = { sort: { createdAt: -1 } };
 
-        const cursor = parcelCollection.find(query, options);
-        const result = await cursor.toArray();
-        res.send(result); 
-    })
+      const cursor = parcelCollection.find(query, options);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
     app.get("/parcels/:id", async (req, res) => {
       const id = req.params.id;
-      const query = {_id : new ObjectId(id)};
+      const query = { _id: new ObjectId(id) };
       const result = await parcelCollection.findOne(query);
       res.send(result);
-    })
+    });
     app.post("/parcels", async (req, res) => {
-        const parcel = req.body;
-        parcel.createdAt = new Date();
-        const result = await parcelCollection.insertOne(parcel);
-        res.send(result);
-    })
+      const parcel = req.body;
+      parcel.createdAt = new Date();
+      const result = await parcelCollection.insertOne(parcel);
+      res.send(result);
+    });
     app.delete("/parcels/:id", async (req, res) => {
-      const {id} = req.params;
-      const query = {_id : new ObjectId(id)};
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
       const result = await parcelCollection.deleteOne(query);
       res.send(result);
+    });
+
+    // Payment related api
+    app.post("/create-checkout-session", async (req, res) => {
+      const paymentInfo = req.body;
+      const amount = parseInt(paymentInfo.cost) * 100 ;
+
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            price_data: {
+              currency: "USD",
+              unit_amount: amount,
+              product_data: {
+                name: paymentInfo.parcelName
+              }
+            },
+            
+            quantity: 1,
+          },
+        ],
+        customer_email: paymentInfo.senderEmail,
+        mode: "payment",
+        metadata: {
+          parcelId : paymentInfo.parcelId
+        },
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+      });
+
+      // console.log(session);
+      res.send({url: session.url});
+    });
+    app.patch("/payment-success", async (req, res) => {
+      const sessionId = req.query.session_id;
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      // console.log(session);
+      if(session.payment_status === "paid"){
+        const id = session.metadata.parcelId;
+        const query = {_id : new ObjectId(id)};
+        const update = {
+          $set : {
+            paymentStatus: "paid"
+          }
+        }
+        const result = await parcelCollection.updateOne(query, update);
+        res.send(result);
+      }
+
+      res.send({success: false});
     })
-
-
-
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!"
+    );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
@@ -70,10 +120,10 @@ async function run() {
 }
 run().catch(console.dir);
 
-app.get('/', (req, res) => {
-  res.send('Zap shift server is running')
-})
+app.get("/", (req, res) => {
+  res.send("Zap shift server is running");
+});
 
 app.listen(port, () => {
-  console.log(`Zap shift server is running on port ${port}`)
-})
+  console.log(`Zap shift server is running on port ${port}`);
+});
