@@ -69,6 +69,30 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     });
+    app.get("/users", verifyFirebaseToken, async (req, res) => {
+      const cursor = userCollection.find();
+      const result = await cursor.toArray();
+      res.send(result);
+    })
+    app.patch("/users/:id", async (req, res) => {
+      const id = req.params.id;
+      const roleInfo = req.body;
+      const query = {_id: new ObjectId(id)};
+      const update = {
+        $set: {
+          role: roleInfo.role
+        }
+      }
+
+      const result = await userCollection.updateOne(query, update);
+      res.send(result);
+    })
+    app.get("/users/:email/role", async (req, res) => {
+      const email = req.params.email;
+      const query = {email:email};
+      const result = await userCollection.findOne(query);
+      res.send({role: result?.role || "user"});
+    })
 
     // rider related apis
     app.post("/riders", async (req, res) => {
