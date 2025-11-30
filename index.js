@@ -86,7 +86,16 @@ async function run() {
       res.send(result);
     });
     app.get("/users", verifyFirebaseToken, async (req, res) => {
-      const cursor = userCollection.find();
+      const {searchText} = req.query;
+      const query = {};
+      if(searchText){
+        query.$or = [
+          {displayName: {$regex: searchText, $options: "i"}},
+          {email: {$regex: searchText, $options: "i"}}
+        ]
+      }
+
+      const cursor = userCollection.find(query).sort({createdAt: -1}).limit(6);
       const result = await cursor.toArray();
       res.send(result);
     })
@@ -157,6 +166,12 @@ async function run() {
 
       res.send(result);
     });
+    app.delete("/riders/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const query = {_id : new ObjectId(id)};
+      const result = await riderCollection.deleteOne(query);
+      res.send(result);
+    })
 
     // parcel related apis
     app.get("/parcels", async (req, res) => {
