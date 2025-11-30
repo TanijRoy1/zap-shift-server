@@ -60,11 +60,27 @@ async function run() {
     const userCollection = zap_shift_db.collection("users");
     const riderCollection = zap_shift_db.collection("riders");
 
+    // middleware before allowing admin activity
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = {email};
+      const user = await userCollection.findOne(query);
+      if(!user || user?.role !== "admin"){
+        return res.status(403).send({message: "Forbidden Access"});
+      }
+      next();
+    }
+
     // user related apis
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.role = "user";
       user.createdAt = new Date();
+
+      const userExist = await userCollection.findOne({email: user.email});
+      if(userExist){
+        return res.send({message: "User Already Exist"});
+      }
 
       const result = await userCollection.insertOne(user);
       res.send(result);
@@ -74,7 +90,7 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     })
-    app.patch("/users/:id", async (req, res) => {
+    app.patch("/users/:id/role",verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const roleInfo = req.body;
       const query = {_id: new ObjectId(id)};
@@ -113,7 +129,7 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
-    app.patch("/riders/:id", verifyFirebaseToken, async (req, res) => {
+    app.patch("/riders/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const status = req.body.status;
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
