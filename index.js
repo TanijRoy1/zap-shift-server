@@ -197,6 +197,19 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
+    app.get("/parcels/rider", async (req, res) => {
+      const {riderEmail, deliveryStatus} = req.query;
+      const query = {};
+      if (riderEmail) {
+        query.riderEmail = riderEmail;
+      }
+      if (deliveryStatus) {
+        query.deliveryStatus = {$in: ["rider_assigned", "rider_arriving"]};
+      }
+      const cursor = parcelCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    })
     app.get("/parcels/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -238,6 +251,17 @@ async function run() {
       }
       const riderResult = await riderCollection.updateOne(riderQuery, riderUpdatedDoc);
       res.send(riderResult);
+    })
+    app.patch("/parcels/:id/status", async (req, res) => {
+      const {deliveryStatus} = req.body;
+      const query = {_id : new ObjectId(req.params.id)};
+      const updatedDoc = {
+        $set: {
+          deliveryStatus : deliveryStatus
+        }
+      }
+      const result = await parcelCollection.updateOne(query, updatedDoc);
+      res.send(result);
     })
 
     // Payment related api
