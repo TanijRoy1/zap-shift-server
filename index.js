@@ -250,6 +250,12 @@ async function run() {
     app.post("/parcels", async (req, res) => {
       const parcel = req.body;
       parcel.createdAt = new Date();
+
+      // generate trackingId while creating parcel
+      parcel.trackingId = generateTrackingId();
+      parcel.deliveryStatus = "parcel_created";
+      logTracking(parcel.trackingId, parcel.deliveryStatus);
+
       const result = await parcelCollection.insertOne(parcel);
       res.send(result);
     });
@@ -325,6 +331,7 @@ async function run() {
       res.send(result);
     });
 
+
     // Payment related api
     app.post("/create-checkout-session", async (req, res) => {
       const paymentInfo = req.body;
@@ -349,6 +356,7 @@ async function run() {
         metadata: {
           parcelId: paymentInfo.parcelId,
           parcelName: paymentInfo.parcelName,
+          trackingId: paymentInfo.trackingId
         },
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
@@ -371,14 +379,16 @@ async function run() {
         });
       }
 
-      const trackingId = generateTrackingId();
+      // get trackingId from metadata : do not generate new trackingId
+      const trackingId = session.metadata.trackingId;
+
       if (session.payment_status === "paid") {
         const id = session.metadata.parcelId;
         const query = { _id: new ObjectId(id) };
         const update = {
           $set: {
             paymentStatus: "paid",
-            deliveryStatus: "pending_pickup",
+            deliveryStatus: "parcel_paid",
             trackingId: trackingId,
           },
         };
@@ -400,7 +410,7 @@ async function run() {
           const resultPayment = await paymentCollection.insertOne(payment);
 
           // create tracking with "pending-pickup"
-          logTracking(trackingId, "pending-pickup");
+          logTracking(trackingId, "parcel_paid");
 
           res.send({
             success: true,
@@ -429,6 +439,14 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
+
+    // tracking related apis
+    app.get("/trackings/:trackingId/logs", async (req, res) => {
+      const trackingId = req.params.trackingId;
+      const query = {trackingId};
+      const result = await trackingsCollection.find(query).sort({createdAt: 1}).toArray();
+      res.send(result);
+    })
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
