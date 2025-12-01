@@ -59,6 +59,7 @@ async function run() {
     const paymentCollection = zap_shift_db.collection("payments");
     const userCollection = zap_shift_db.collection("users");
     const riderCollection = zap_shift_db.collection("riders");
+    const trackingsCollection = zap_shift_db.collection("trackings");
 
     // middleware before allowing admin activity
     const verifyAdmin = async (req, res, next) => {
@@ -70,6 +71,18 @@ async function run() {
       }
       next();
     };
+
+    // create trackings log
+    const logTracking = async (trackingId, status) => {
+      const log = {
+        trackingId,
+        status, 
+        details: status.split("_").join(" "),
+        createdAt: new Date()
+      }
+      const result = await trackingsCollection.insertOne(log);
+      return result;
+    }
 
     // user related apis
     app.post("/users", async (req, res) => {
@@ -246,13 +259,15 @@ async function run() {
       const result = await parcelCollection.deleteOne(query);
       res.send(result);
     });
+    // assign rider: update parcel, update rider, create tracking
     app.patch(
       "/parcels/:id",
       verifyFirebaseToken,
       verifyAdmin,
       async (req, res) => {
-        const { riderId, riderName, riderEmail } = req.body;
+        const { riderId, riderName, riderEmail, trackingId } = req.body;
         const id = req.params.id;
+        // parcel update
         const query = { _id: new ObjectId(id) };
         const updatedDoc = {
           $set: {
@@ -263,6 +278,9 @@ async function run() {
           },
         };
         const result = await parcelCollection.updateOne(query, updatedDoc);
+
+        // create tracking
+        logTracking(trackingId, "rider_assigned");
 
         // rider update
         const riderQuery = { _id: new ObjectId(riderId) };
@@ -279,7 +297,7 @@ async function run() {
       }
     );
     app.patch("/parcels/:id/status", async (req, res) => {
-      const { deliveryStatus, riderId } = req.body;
+      const { deliveryStatus, riderId, trackingId } = req.body;
       const query = { _id: new ObjectId(req.params.id) };
       const updatedDoc = {
         $set: {
@@ -300,6 +318,8 @@ async function run() {
           riderUpdatedDoc
         );
       }
+      // create tracking
+      logTracking(trackingId, deliveryStatus);
 
       const result = await parcelCollection.updateOne(query, updatedDoc);
       res.send(result);
@@ -342,8 +362,8 @@ async function run() {
       const session = await stripe.checkout.sessions.retrieve(sessionId);
       // console.log(session);
       const transactionId = session.payment_intent;
-      const query = { transactionId: transactionId };
-      const paymentExist = await paymentCollection.findOne(query);
+      const existQuery = { transactionId: transactionId };
+      const paymentExist = await paymentCollection.findOne(existQuery);
       if (paymentExist) {
         return res.send({
           message: "payment already exist.",
@@ -358,7 +378,7 @@ async function run() {
         const update = {
           $set: {
             paymentStatus: "paid",
-            deliveryStatus: "pending-pickup",
+            deliveryStatus: "pending_pickup",
             trackingId: trackingId,
           },
         };
@@ -378,6 +398,10 @@ async function run() {
         };
         if (session.payment_status === "paid") {
           const resultPayment = await paymentCollection.insertOne(payment);
+
+          // create tracking with "pending-pickup"
+          logTracking(trackingId, "pending-pickup");
+
           res.send({
             success: true,
             modifiedParcel: result,
