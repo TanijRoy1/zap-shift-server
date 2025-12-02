@@ -9,7 +9,9 @@ const port = process.env.PORT || 3000;
 const crypto = require("crypto");
 const admin = require("firebase-admin");
 
-const serviceAccount = require("./zap-shift-firebase-adminsdk.json");
+// const serviceAccount = require("./zap-shift-firebase-adminsdk.json");
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
 const { format } = require("path");
 
 admin.initializeApp({
@@ -53,7 +55,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const zap_shift_db = client.db("zap_shit_db");
     const parcelCollection = zap_shift_db.collection("parcels");
@@ -68,6 +70,15 @@ async function run() {
       const query = { email };
       const user = await userCollection.findOne(query);
       if (!user || user?.role !== "admin") {
+        return res.status(403).send({ message: "Forbidden Access" });
+      }
+      next();
+    };
+    const verifyRider = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+      if (!user || user?.role !== "rider") {
         return res.status(403).send({ message: "Forbidden Access" });
       }
       next();
@@ -331,8 +342,10 @@ async function run() {
       const result = await parcelCollection.updateOne(query, updatedDoc);
       res.send(result);
     });
+
+
     // aggregate: pipeline
-    app.get("/parcels/delivery-status/stats", async (req, res) => {
+    app.get("/parcels/delivery-status/stats", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const pipeline = [
         {
           $group: {
@@ -352,7 +365,7 @@ async function run() {
       const result = await parcelCollection.aggregate(pipeline).toArray();
       res.send(result);
     })
-    app.get("/riders/delivery-per-day", async (req, res) => {
+    app.get("/riders/delivery-per-day",verifyFirebaseToken,verifyRider, async (req, res) => {
       const email = req.query.email;
       // aggregate on parcel
       const pipeline = [
@@ -519,7 +532,7 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
